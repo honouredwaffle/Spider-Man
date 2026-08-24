@@ -380,15 +380,18 @@ function animate(){
 
   // third-person follow camera (behind Spidey, orbit with mouse drag)
   const camDist = 18;
-  const camHeight = 6.5;
+  const camHeight = 8;
   const offset = new THREE.Vector3(
     Math.sin(yaw) * Math.cos(pitch) * camDist,
     Math.sin(pitch) * camDist + camHeight,
     Math.cos(yaw) * Math.cos(pitch) * camDist
   );
   const ideal = player.position.clone().add(offset);
-  camera.position.lerp(ideal, 0.5);
-  camera.lookAt(player.position.clone().add(new THREE.Vector3(0, 1.5, 0)));
+  camera.position.lerp(ideal, 0.35);
+  camera.lookAt(player.position.clone().add(new THREE.Vector3(0, 1.2, 0)));
+
+  // make Spidey face the camera direction so we always see his back
+  player.rotation.y = Math.atan2(-Math.sin(yaw), -Math.cos(yaw));
 
   // animate limbs
   player.children.forEach((c,i)=>{ if(c.geometry && (c.geometry.type.includes('Box')||c.geometry.type.includes('Sphere'))){
