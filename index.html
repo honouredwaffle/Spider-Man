@@ -78,7 +78,7 @@
 import * as THREE from 'three';
 
 let scene, camera, renderer, player;
-let clock = new THREE.Time ? new THREE.Time() : null;
+let clock = new THREE.Clock();
 let buildings = [];
 let villains = [];
 let defeated = 0;
@@ -484,12 +484,6 @@ function resize(){
   camera.aspect = innerWidth/innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(innerWidth, innerHeight);
-}
-
-// clock shim
-if(!clock){
-  const start = performance.now();
-  clock = { getDelta(){ const now=performance.now(); const d=(now-start)/1000; return d; } };
 }
 
 animate();
