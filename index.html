@@ -1,0 +1,498 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Spider-Man: Free Swing NYC</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { overflow: hidden; background: #0b0e1a; font-family: 'Segoe UI', Arial, sans-serif; color: #fff; }
+  canvas { display: block; }
+  #hud {
+    position: fixed; top: 0; left: 0; right: 0; padding: 14px 20px;
+    display: flex; justify-content: space-between; align-items: center;
+    pointer-events: none; z-index: 10; text-shadow: 0 2px 6px rgba(0,0,0,.7);
+  }
+  #hud .title { font-weight: 800; letter-spacing: 1px; font-size: 16px; }
+  #hud .title span { color: #e0352f; }
+  #score { font-size: 15px; font-weight: 600; background: rgba(0,0,0,.4); padding: 6px 14px; border-radius: 20px; }
+  #alert {
+    position: fixed; top: 90px; left: 50%; transform: translateX(-50%);
+    background: rgba(224,53,47,.95); color: #fff; font-weight: 800; font-size: 18px;
+    padding: 12px 26px; border-radius: 30px; letter-spacing: 1px;
+    box-shadow: 0 4px 18px rgba(224,53,47,.5); z-index: 20;
+    opacity: 0; transition: opacity .3s; pointer-events: none; text-align: center;
+  }
+  #alert.show { opacity: 1; }
+  #controls {
+    position: fixed; bottom: 0; left: 0; right: 0; padding: 12px 16px;
+    background: rgba(10,12,24,.75); backdrop-filter: blur(6px);
+    font-size: 12.5px; color: #cfd3e6; z-index: 10; line-height: 1.55;
+    border-top: 1px solid rgba(255,255,255,.08);
+  }
+  #controls b { color: #fff; }
+  #loading {
+    position: fixed; inset: 0; background: #0b0e1a; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; z-index: 50; gap: 14px;
+  }
+  #loading .spinner { width: 46px; height: 46px; border: 4px solid #333; border-top-color: #e0352f; border-radius: 50%; animation: spin 1s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  #loading p { font-size: 15px; color: #aeb4d0; }
+  #start {
+    position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center;
+    justify-content: center; z-index: 60; background: radial-gradient(circle at 50% 40%, #1a2036 0%, #0b0e1a 70%);
+    text-align: center; padding: 24px;
+  }
+  #start h1 { font-size: 44px; letter-spacing: 2px; } #start h1 span { color: #e0352f; }
+  #start p { margin-top: 12px; max-width: 460px; color: #cfd3e6; line-height: 1.6; font-size: 15px; }
+  #start .btn {
+    margin-top: 26px; background: #e0352f; color: #fff; border: none; font-size: 20px; font-weight: 800;
+    padding: 14px 42px; border-radius: 40px; cursor: pointer; letter-spacing: 1px; transition: transform .15s, box-shadow .15s;
+    box-shadow: 0 6px 24px rgba(224,53,47,.45);
+  }
+  #start .btn:hover { transform: scale(1.06); }
+  #zone { position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%); font-size: 13px; color: #9aa0c0; font-weight: 700; letter-spacing: 3px; pointer-events: none; opacity: 0; transition: opacity .5s; z-index: 8; }
+  #zone.show { opacity: 1; }
+</style>
+</head>
+<body>
+<div id="loading"><div class="spinner"></div><p>Building New York…</p></div>
+<div id="start">
+  <h1>SPIDER<span>-</span>MAN</h1>
+  <p>Free swing NYC — swing between the skyscrapers, dodge the streets, and take down villains when they show up. 🕷️</p>
+  <button class="btn" onclick="startGame()">START SWINGING</button>
+</div>
+<div id="hud">
+  <div class="title">🕷️ SPIDER<span>-</span>MAN · NYC</div>
+  <div id="score">🏙️ Defeated: 0</div>
+</div>
+<div id="zone"></div>
+<div id="alert">⚠️ VILLAIN SPOTTED — GO! </div>
+<div id="controls">
+  <b>WASD</b> move &nbsp;·&nbsp; <b>Space</b> jump / web-swing &nbsp;·&nbsp; hold <b>Space</b> to keep swinging &nbsp;·&nbsp; <b>Mouse</b> look &nbsp;·&nbsp; <b>Left Click</b> web-shot &nbsp;·&nbsp; <b>Shift</b> sprint. Reach a villain and get close the hit them. (Click the game to lock mouse.)
+</div>
+<script type="importmap">
+{ "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js" } }
+</script>
+<script type="module">
+import * as THREE from 'three';
+
+let scene, camera, renderer, player;
+let clock = new THREE.Time ? new THREE.Time() : null;
+let buildings = [];
+let villains = [];
+let defeated = 0;
+let speed = 0, yaw = 0, pitch = 0;
+const keys = {};
+const GRAVITY = -26;
+const velocity = new THREE.Vector3(0,0,0);
+let grounded = false;
+let swinging = false;
+let swingAnchor = null;
+let swingDir = new THREE.Vector3();
+let sprinting = false;
+let alertTimer = null;
+let gameStarted = false;
+const spawnedZones = new Set();
+const COLLIDE_SCORE = 320;
+
+init();
+
+function init(){
+  scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x0e1428);
+  scene.fog = new THREE.Fog(0x0e1428, 400, 1200);
+
+  camera = new THREE.PerspectiveCamera(70, innerWidth/innerHeight, 0.1, 2500);
+  renderer = new THREE.WebGLRenderer({ antialias:true });
+  renderer.setSize(innerWidth, innerHeight);
+  renderer.shadowMap.enabled = true;
+  renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+  document.body.appendChild(renderer.domElement);
+
+  // lights
+  scene.add(new THREE.AmbientLight(0x8899dd, 0.6));
+  const sun = new THREE.DirectionalLight(0xffd9a0, 1.1);
+  sun.position.set(300, 500, 200);
+  sun.castShadow = true;
+  scene.add(sun);
+  const hemi = new THREE.HemisphereLight(0x4466aa, 0x223344, 0.5);
+  scene.add(hemi);
+
+  buildSky();
+  buildGround();
+  buildCity();
+
+  // Spidey
+  player = buildSpiderMan();
+  scene.add(player);
+  player.position.set(0, 60, 150);
+  camera.position.copy(player.position);
+
+  resize();
+  addEventListener('resize', resize);
+  addEventListener('keydown', e=>{ keys[e.code]=true; if(e.code==='Space') e.preventDefault(); });
+  addEventListener('keyup', e=>{ keys[e.code]=false; });
+  addEventListener('mousemove', onMouseMove);
+  addEventListener('mousedown', ()=>{ onWebShot(); document.body.requestPointerLock && document.body.requestPointerLock(); });
+  addEventListener('mousemove', onMouseMove);
+  addEventListener('click', ()=>renderer.domElement.requestPointerLock && renderer.domElement.requestPointerLock());
+
+  // hide loading
+  setTimeout(()=>{ const l=document.getElementById('loading'); if(l) l.remove(); }, 200);
+}
+
+function startGame(){
+  gameStarted = true;
+  document.getElementById('start').remove();
+  renderer.domElement.requestPointerLock();
+}
+
+function buildSky(){
+  const sky = new THREE.Mesh(new THREE.SphereGeometry(1500, 32, 32),
+    new THREE.MeshBasicMaterial({ color: 0x0b1024, side: THREE.BackSide }));
+  sky.position.y = 0; scene.add(sky);
+  // stars
+  const sg = new THREE.BufferGeometry(); const n=600; const pos=new Float32Array(n*3);
+  for(let i=0;i<n;i++){ pos[i*3]=(Math.random()-0.5)*2400; pos[i*3+1]=Math.random()*700+80; pos[i*3+2]=(Math.random()-0.5)*2400; }
+  sg.setAttribute('position', new THREE.BufferAttribute(pos,3));
+  const stars = new THREE.Points(sg, new THREE.PointsMaterial({ color:0xffffff, size:1.6 }));
+  scene.add(stars);
+}
+
+function buildGround(){
+  const g = new THREE.Mesh(new THREE.PlaneGeometry(1600,1600),
+    new THREE.MeshStandardMaterial({ color: 0x14171f, roughness: 0.95 }));
+  g.rotation.x = -Math.PI/2; g.receiveShadow = true; scene.add(g);
+  // grid roads
+  const roadMat = new THREE.MeshStandardMaterial({ color: 0x23262f });
+  for(let i=0; i<32; i++){
+    const d = -800 + i*52;
+    const r1 = new THREE.Mesh(new THREE.PlaneGeometry(1600, 6), roadMat); r1.rotation.x=-Math.PI/2; r1.position.set(0,0.1,d); scene.add(r1);
+  }
+  // occasional colored roofs
+}
+
+function buildCity(){
+  const g = new THREE.Group();
+  // landmark towers (hand-placed)
+  addTower(g, -60, 38, -40,  26,  200, 26, 0x44556b);   // empire stand-in
+  addLandmarkEmpire(g, -60, -40);
+  addTower(g, 90, 34,  -20,  22,  170, 22, 0x3a4a5e);    // chrysler stand-in
+  addLandmarkChrysler(g, 90, -20);
+  addTower(g, 40, 36,  120, 20, 150, 20, 0x3f5066);
+
+  // random skyscrapers
+  for(let i=0;i<120;i++){
+    const x = (Math.random()-0.5)*1100;
+    const z = (Math.random()-0.5)*1100;
+    if(Math.abs(x)<60 && Math.abs(z)<60) continue;
+    const w=16+Math.random()*22, h=40+Math.random()*160, d=16+Math.random()*22;
+    const col = new THREE.Color().setHSL(0.57, 0.12, 0.22+Math.random()*0.18);
+    addTower(g, x, w/2, z, w, h, d, col.getHex());
+  }
+  scene.add(g);
+  // collect building AABBs for collision
+  g.traverse(o=>{ if(o.userData.isBuilding) buildings.push(o.userData); });
+}
+
+function addLandmarkEmpire(g, x, z){
+  const base = new THREE.Mesh(new THREE.BoxGeometry(34, 120, 34), new THREE.MeshStandardMaterial({color:0x9aa6b5, roughness:.5, metalness:.4}));
+  base.position.set(x, 60, z); base.castShadow=true; base.userData={isBuilding:true,box:new THREE.Box3()}; g.add(base);
+  const tier = new THREE.Mesh(new THREE.BoxGeometry(26, 40, 26), new THREE.MeshStandardMaterial({color:0xb7c1cf, roughness:.5, metalness:.4}));
+  tier.position.set(x, 140, z); g.add(tier);
+  const spire = new THREE.Mesh(new THREE.CylinderGeometry(4,10,60,8), new THREE.MeshStandardMaterial({color:0xccd6e0, roughness:.3, metalness:.7}));
+  spire.position.set(x, 185, z); g.add(spire);
+}
+
+function addLandmarkChrysler(g, x, z){
+  const base = new THREE.Mesh(new THREE.BoxGeometry(24, 90, 24, 1,1,1), new THREE.MeshStandardMaterial({color:0x9fb0c0, roughness:.45, metalness:.5}));
+  base.position.set(x,45,z); base.castShadow=true; base.userData={isBuilding:true,box:new THREE.Box3()}; g.add(base);
+  const crown = new THREE.Mesh(new THREE.ConeGeometry(16,50,8), new THREE.MeshStandardMaterial({color:0xcdd8e4, roughness:.4, metalness:.6}));
+  crown.position.set(x,115,z); g.add(crown);
+}
+
+function addTower(grp, x, y, z, w, h, d, colorHex){
+  const m = new THREE.MeshStandardMaterial({ color: colorHex, roughness:.7, metalness:.25 });
+  const mw = new THREE.MeshBasicMaterial({ color: 0xffe9a0 });
+  const msh = new THREE.Mesh(new THREE.BoxGeometry(w,h,d), m);
+  msh.position.set(x, y, z); msh.castShadow=true; msh.receiveShadow=true;
+  msh.userData={ isBuilding:true, box:new THREE.Box3().setFromCenterAndSize(new THREE.Vector3(x,y,z), new THREE.Vector3(w,h,d)) };
+  grp.add(msh);
+  // windows
+  const winMat = new THREE.MeshBasicMaterial({ color: 0xffe9a0, transparent:true, opacity:.0 });
+  const win = new THREE.Mesh(new THREE.BoxGeometry(w+0.4, h*0.6, d+0.4), winMat);
+  win.position.set(x, y, z); grp.add(win);
+}
+
+function buildSpiderMan(){
+  const s = new THREE.Group();
+  const body = new THREE.SphereGeometry(1, 24, 24, 0, Math.PI*2, 0.3, Math.PI*0.9);
+  // torso (blue with red accents)
+  const torso = new THREE.Mesh(new THREE.SphereGeometry(1.0, 20, 20),
+    new THREE.MeshStandardMaterial({ color: 0x1d3a6e, roughness:.7 }));
+  torso.position.y = 0; s.add(torso);
+  // red upper chest
+  const chest = new THREE.Mesh(new THREE.SphereGeometry(1.02, 20, 20, 0, Math.PI*2, 0, Math.PI*0.55),
+    new THREE.MeshStandardMaterial({ color: 0xd92b24, roughness:.65 }));
+  chest.position.y = 0.35; s.add(chest);
+  // red belt
+  const belt = new THREE.Mesh(new THREE.CylinderGeometry(0.82, 0.82, 0.22, 20),
+    new THREE.MeshStandardMaterial({ color: 0xd92b24, roughness:.7 }));
+  belt.position.y = -0.55; s.add(belt);
+  // head (mask)
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.55, 24, 24),
+    new THREE.MeshStandardMaterial({ color: 0xd92b24, roughness:.6 }));
+  head.position.y = 1.5; s.add(head);
+  // eyes (white lenses, black outline)
+  const eyeMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness:.15, metalness:.3 });
+  const eyeGeo = new THREE.SphereGeometry(0.20, 16, 16);
+  for(const side of [-1,1]){
+    const eye = new THREE.Mesh(eyeGeo, eyeMat);
+    eye.position.set(side*0.42, 1.58, 0.30); eye.scale.z=0.55; eye.scale.x=0.75; s.add(eye);
+    const rim = new THREE.Mesh(new THREE.SphereGeometry(0.23,16,16), new THREE.MeshStandardMaterial({color:0x111111}));
+    rim.position.copy(eye.position); rim.scale.z=0.55; rim.scale.x=0.75; s.add(rim);
+  }
+  // chest spider emblem (black)
+  const spider = new THREE.Mesh(new THREE.SphereGeometry(0.3, 12, 12), new THREE.MeshStandardMaterial({color:0x000000}));
+  spider.position.set(0, 0.35, 0.62); spider.scale.set(1.3, 0.7, 0.3); s.add(spider);
+  // legs (blue)
+  const legRed = new THREE.MeshStandardMaterial({ color: 0xd92b24, roughness:.7 });
+  for(let i=-1;i<=1;i+=2){
+    const thigh = new THREE.Mesh(new THREE.BoxGeometry(0.32,0.75,0.32), new THREE.MeshStandardMaterial({color:0x1d3a6e}));
+    thigh.position.set(0.28*i, -1.0, 0); s.add(thigh);
+    const boot = new THREE.Mesh(new THREE.BoxGeometry(0.3,0.5,0.34), legRed);
+    boot.position.set(0.28*i, -1.6, 0.05); s.add(boot);
+  }
+  // arms red
+  for(let i=-1;i<=1;i+=2){
+    const arm = new THREE.Mesh(new THREE.BoxGeometry(0.26,0.35,0.9), legRed);
+    arm.position.set(0.85*i, 0.15, 0.35); s.add(arm);
+  }
+  // web shooters
+  const ws = new THREE.Mesh(new THREE.BoxGeometry(0.1,0.1,0.5), new THREE.MeshStandardMaterial({color:0x555555}));
+  ws.position.set(0.95, 0.15, 0.62); s.add(ws);
+  s.castShadow = true;
+  return s;
+}
+
+function onMouseMove(e){
+  const dx = e.movementX || 0;
+  const dy = e.movementY || 0;
+  yaw -= dx*0.003;
+  pitch -= dy*0.003;
+  pitch = Math.max(-1.2, Math.min(1.2, pitch));
+}
+function onWebShot(){
+  // simple web-shot impulse forward
+  const dir = new THREE.Vector3();
+  camera.getWorldDirection(dir);
+  velocity.add(dir.multiplyScalar(24));
+}
+
+function spawnVillainAlert(){
+  const zones = [
+    {x:0,z:30,t:'downtown'},{x:150,z:-60,t:'midtown'},{x:-140,z:40,t:'west side'},
+    {x:60,z:-180,t:'east village'},{x:-90,z:200,t:'uptown'},{x:240,z:120,t:'the heights'}
+  ];
+  // pick a zone not currently active
+  const available = zones.filter(z=>!spawnedZones.has(z.t));
+  if(!available.length) return;
+  const zone = available[Math.floor(Math.random()*available.length)];
+  spawnedZones.add(zone.t);
+  // spawn a villain there
+  const v = buildVillain();
+  v.position.set(zone.x, 1.5, zone.z);
+  v.userData.zone = zone.t;
+  scene.add(v);
+  villains.push(v);
+  // alert
+  const el = document.getElementById('alert');
+  el.textContent = '⚠️ VILLAIN SPOTTED — ' + zone.t.toUpperCase() + '!';
+  el.classList.add('show');
+  const hint = document.getElementById('zone');
+  hint.textContent = zone.t.toUpperCase();
+  hint.classList.add('show');
+  clearTimeout(alertTimer);
+  alertTimer = setTimeout(()=>{ el.classList.remove('show'); }, 3000);
+}
+
+function buildVillain(){
+  const g = new THREE.Group();
+  const mat = new THREE.MeshStandardMaterial({ color: 0x3a3f4a, roughness:.7 });
+  const body = new THREE.Mesh(new THREE.SphereGeometry(1.2, 16,16), mat); body.position.y=1.6; g.add(body);
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.6, 16,16), new THREE.MeshStandardMaterial({color:0x2a2e38})); head.position.y=3.1; g.add(head);
+  const eyes = new THREE.Mesh(new THREE.SphereGeometry(0.12,8,8), new THREE.MeshStandardMaterial({color:0xff0000}));
+  eyes.position.set(0,3.15,0.5); g.add(eyes);
+  // big arm
+  const arm = new THREE.Mesh(new THREE.BoxGeometry(0.5,0.5,1.8), new THREE.MeshStandardMaterial({color:0x8a2b2b}));
+  arm.position.set(1.4, 2, 0.6); g.add(arm);
+  g.castShadow = true;
+  g.userData = { hp: 1, punch: 0 };
+  return g;
+}
+
+function hitVillain(v){
+  v.userData.punch++;
+  if(v.userData.punch >= 2){
+    scene.remove(v); villains = villains.filter(x=>x!==v);
+    const zone = v.userData.zone; if(zone) spawnedZones.delete(zone);
+    defeated++;
+    document.getElementById('score').textContent = '🏙️ Defeated: '+defeated;
+  }
+}
+
+function updateVillains(dt){
+  for(const v of villains){
+    const to = new THREE.Vector3().subVectors(player.position, v.position);
+    to.y = 0;
+    const dist = to.length();
+    if(dist < 0.1) continue;
+    to.normalize().multiplyScalar(6*dt);
+    v.position.add(to);
+    v.lookAt(player.position.x, v.position.y, player.position.z);
+    if(dist < 4.5){
+      // player landed a hit on villain & villain is close to player => damage villain
+      hitVillain(v);
+    }
+  }
+}
+
+let elapsed = 0;
+function animate(){
+  requestAnimationFrame(animate);
+  if(!gameStarted) { renderer.render(scene,camera); return; }
+  const dt = Math.min(clock.getDelta(), 0.05);
+  elapsed += dt;
+
+  // villain spawning
+  if(Math.floor(elapsed/18) > Math.floor((elapsed-dt)/18) && villains.length < 3){
+    spawnVillainAlert();
+  }
+
+  updatePlayer(dt);
+  updateVillains(dt);
+  collideWorld();
+
+  // camera follow
+  camera.position.lerp(player.position.clone().add(new THREE.Vector3(0,1.5,0)), 0.4);
+  camera.rotation.set(pitch, yaw, 0, 'YXZ');
+
+  // animate limbs
+  player.children.forEach((c,i)=>{ if(c.geometry && (c.geometry.type.includes('Box')||c.geometry.type.includes('Sphere'))){
+    if(c.position.y < 0) c.rotation.x = Math.sin(elapsed*10)*0.3; // legs
+  }});
+
+  renderer.render(scene,camera);
+}
+
+function updatePlayer(dt){
+  const dir = new THREE.Vector3();
+  const f = new THREE.Vector3(Math.sin(yaw),0,Math.cos(yaw));
+  const r = new THREE.Vector3(f.z,0,-f.x);
+  let mx=0,mz=0;
+  if(keys['KeyW']) mz=1; if(keys['KeyS']) mz=-1;
+  if(keys['KeyD']) mx=1; if(keys['KeyA']) mx=-1;
+  dir.addScaledVector(f,mz).addScaledVector(r,mx);
+  if(dir.lengthSq()>0) dir.normalize();
+
+  sprinting = keys['ShiftLeft']||keys['ShiftRight'];
+  const run = (sprinting?34:20)*(mz!==0?1:0.7);
+
+  // horizontal movement
+  velocity.x += dir.x * run * dt*2;
+  velocity.z += dir.z * run * dt*2;
+  // damping
+  velocity.x *= 0.99; velocity.z *= 0.99;
+  const maxH = sprinting? 55 : 38;
+  const hv = new THREE.Vector2(velocity.x, velocity.z);
+  if(hv.length()>maxH){ hv.normalize().multiplyScalar(maxH); velocity.x=hv.x; velocity.z=hv.y; }
+
+  // gravity / swing
+  if(swinging && swingAnchor){
+    const toAnchor = new THREE.Vector3().subVectors(swingAnchor, player.position);
+    const len = toAnchor.length();
+    const maxLen = 90;
+    if(len > maxLen){
+      // tension: pull toward anchor
+      const pull = toAnchor.clone().normalize().multiplyScalar((len-maxLen)*8);
+      velocity.add(pull.multiplyScalar(dt));
+    }
+    // tangential swing speed from forward input
+    const forward = camera.getWorldDirection(new THREE.Vector3());
+    forward.y = 0; forward.normalize();
+    velocity.addScaledVector(forward, (keys['Space']? 18:9)*dt);
+  }
+  if(!swinging){
+    velocity.y += GRAVITY*dt;
+    // web-strike cancel? jump
+    if(keys['Space'] && grounded){ velocity.y = 16; grounded=false; }
+  } else {
+    // gentle gravity during swing
+    velocity.y -= GRAVITY*0.35*dt;
+  }
+
+  // start swing
+  if(keys['Space'] && !grounded && !swinging){
+    // anchor upward-forward
+    const fw = camera.getWorldDirection(new THREE.Vector3()); fw.y=0; fw.normalize();
+    swingAnchor = player.position.clone().addScaledVector(fw, 35).add(new THREE.Vector3(0, 60, 0));
+    swinging = true;
+  }
+  if(!keys['Space'] && swinging){ swinging=false; swingAnchor=null; }
+
+  player.position.add(velocity.clone().multiplyScalar(dt));
+
+  // ground
+  if(player.position.y < 2.0){
+    player.position.y = 2.0; velocity.y=0; grounded=true;
+  } else { grounded = false; }
+}
+
+function collideWorld(){
+  for(const b of buildings){
+    const box = b.box;
+    if(!box.intersectsBox(new THREE.Box3().setFromCenterAndSize(
+      player.position, new THREE.Vector3(1.4,3.2,1.4)))) continue;
+    // push out
+    const c = box.getCenter(new THREE.Vector3());
+    const diff = player.position.clone().sub(c);
+    const overlap = new THREE.Vector3(
+      0,0,0
+    );
+    const half = new THREE.Vector3(box.max.x-box.min.x, box.max.y-box.min.y, box.max.z-box.min.z).multiplyScalar(0.5);
+    const ex = (half.x+0.7) - Math.abs(diff.x);
+    const ey = (half.y+1.6) - Math.abs(diff.y);
+    const ez = (half.z+0.7) - Math.abs(diff.z);
+    if(ex<ey && ex<ez){
+      if(diff.x>0) player.position.x = c.x+half.x+0.7; else player.position.x = c.x-half.x-0.7;
+    } else if(ey<ez){
+      if(diff.y>0){ player.position.y = c.y+half.y+1.6; velocity.y=Math.max(0,velocity.y); }
+      else { player.position.y = c.y-half.y-1.6; }
+    } else {
+      if(diff.z>0) player.position.z = c.z+half.z+0.7; else player.position.z = c.z-half.z-0.7;
+    }
+    velocity.multiplyScalar(0.6);
+  }
+  // world bounds
+  player.position.x = Math.max(-750, Math.min(750, player.position.x));
+  player.position.z = Math.max(-750, Math.min(750, player.position.z));
+  if(player.position.y < 2){ player.position.y=2; grounded=true; }
+}
+
+function resize(){
+  camera.aspect = innerWidth/innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+}
+
+// clock shim
+if(!clock){
+  const start = performance.now();
+  clock = { getDelta(){ const now=performance.now(); const d=(now-start)/1000; return d; } };
+}
+
+animate();
+</script>
+</body>
+</html>
