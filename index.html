@@ -69,7 +69,7 @@
 <div id="zone"></div>
 <div id="alert">⚠️ VILLAIN SPOTTED — GO! </div>
 <div id="controls">
-  <b>WASD</b> move &nbsp;·&nbsp; <b>Space</b> jump / web-swing &nbsp;·&nbsp; hold <b>Space</b> to keep swinging &nbsp;·&nbsp; <b>Mouse</b> look &nbsp;·&nbsp; <b>Left Click</b> web-shot &nbsp;·&nbsp; <b>Shift</b> sprint. Reach a villain and get close the hit them. (Click the game to lock mouse.)
+  <b>WASD</b> move &nbsp;·&nbsp; <b>Space</b> jump / web-swing (hold to keep swinging) &nbsp;·&nbsp; <b>Left-drag</b> orbit camera &nbsp;·&nbsp; <b>Left Click</b> web-shot &nbsp;·&nbsp; <b>Shift</b> sprint. Reach a villain and get close to hit them.
 </div>
 <script type="importmap">
 { "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js" } }
@@ -134,9 +134,11 @@ function init(){
   addEventListener('keydown', e=>{ keys[e.code]=true; if(e.code==='Space') e.preventDefault(); });
   addEventListener('keyup', e=>{ keys[e.code]=false; });
   addEventListener('mousemove', onMouseMove);
-  addEventListener('mousedown', ()=>{ onWebShot(); document.body.requestPointerLock && document.body.requestPointerLock(); });
-  addEventListener('mousemove', onMouseMove);
-  addEventListener('click', ()=>renderer.domElement.requestPointerLock && renderer.domElement.requestPointerLock());
+  document.getElementById('start').style.pointerEvents='auto';
+
+  // third person: mouse drag orbits camera (no pointer lock)
+  addEventListener('mousedown', e=>{ dragging = true; if(e.target.closest('#start')) return; });
+  addEventListener('mouseup', ()=> dragging = false);
 
   // hide loading
   setTimeout(()=>{ const l=document.getElementById('loading'); if(l) l.remove(); }, 200);
@@ -147,8 +149,8 @@ function init(){
 
 function startGame(){
   gameStarted = true;
-  document.getElementById('start').remove();
-  renderer.domElement.requestPointerLock();
+  const s = document.getElementById('start');
+  if(s) s.remove();
 }
 
 function buildSky(){
@@ -280,16 +282,14 @@ function buildSpiderMan(){
 }
 
 function onMouseMove(e){
-  const dx = e.movementX || 0;
-  const dy = e.movementY || 0;
-  yaw -= dx*0.003;
-  pitch -= dy*0.003;
-  pitch = Math.max(-1.2, Math.min(1.2, pitch));
+  if(!dragging) return;
+  yaw -= e.movementX * 0.004;
+  pitch -= e.movementY * 0.004;
+  pitch = Math.max(-0.9, Math.min(0.9, pitch));
 }
 function onWebShot(){
-  // simple web-shot impulse forward
-  const dir = new THREE.Vector3();
-  camera.getWorldDirection(dir);
+  // simple web-shot impulse forward (yaw-based)
+  const dir = new THREE.Vector3(Math.sin(yaw), 0, Math.cos(yaw));
   velocity.add(dir.multiplyScalar(24));
 }
 
@@ -362,6 +362,7 @@ function updateVillains(dt){
 }
 
 let elapsed = 0;
+let dragging = false;
 function animate(){
   requestAnimationFrame(animate);
   if(!gameStarted) { renderer.render(scene,camera); return; }
@@ -377,9 +378,17 @@ function animate(){
   updateVillains(dt);
   collideWorld();
 
-  // camera follow
-  camera.position.lerp(player.position.clone().add(new THREE.Vector3(0,1.5,0)), 0.4);
-  camera.rotation.set(pitch, yaw, 0, 'YXZ');
+  // third-person follow camera (behind Spidey, orbit with mouse drag)
+  const camDist = 11;
+  const camHeight = 4.5;
+  const offset = new THREE.Vector3(
+    Math.sin(yaw) * Math.cos(pitch) * camDist,
+    Math.sin(pitch) * camDist + camHeight,
+    Math.cos(yaw) * Math.cos(pitch) * camDist
+  );
+  const ideal = player.position.clone().add(offset);
+  camera.position.lerp(ideal, 0.5);
+  camera.lookAt(player.position.clone().add(new THREE.Vector3(0, 1.5, 0)));
 
   // animate limbs
   player.children.forEach((c,i)=>{ if(c.geometry && (c.geometry.type.includes('Box')||c.geometry.type.includes('Sphere'))){
@@ -391,8 +400,9 @@ function animate(){
 
 function updatePlayer(dt){
   const dir = new THREE.Vector3();
-  const f = new THREE.Vector3(Math.sin(yaw),0,Math.cos(yaw));
-  const r = new THREE.Vector3(f.z,0,-f.x);
+  // build camera-based forward/right from yaw
+  const f = new THREE.Vector3(Math.sin(yaw), 0, Math.cos(yaw));
+  const r = new THREE.Vector3(f.z, 0, -f.x);
   let mx=0,mz=0;
   if(keys['KeyW']) mz=1; if(keys['KeyS']) mz=-1;
   if(keys['KeyD']) mx=1; if(keys['KeyA']) mx=-1;
@@ -421,8 +431,8 @@ function updatePlayer(dt){
       const pull = toAnchor.clone().normalize().multiplyScalar((len-maxLen)*8);
       velocity.add(pull.multiplyScalar(dt));
     }
-    // tangential swing speed from forward input
-    const forward = camera.getWorldDirection(new THREE.Vector3());
+    // tangential swing speed from forward input (yaw-based)
+    const forward = new THREE.Vector3(Math.sin(yaw), 0, Math.cos(yaw));
     forward.y = 0; forward.normalize();
     velocity.addScaledVector(forward, (keys['Space']? 18:9)*dt);
   }
@@ -438,7 +448,7 @@ function updatePlayer(dt){
   // start swing
   if(keys['Space'] && !grounded && !swinging){
     // anchor upward-forward
-    const fw = camera.getWorldDirection(new THREE.Vector3()); fw.y=0; fw.normalize();
+    const fw = new THREE.Vector3(Math.sin(yaw), 0, Math.cos(yaw)); fw.y=0; fw.normalize();
     swingAnchor = player.position.clone().addScaledVector(fw, 35).add(new THREE.Vector3(0, 60, 0));
     swinging = true;
   }
