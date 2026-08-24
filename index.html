@@ -60,7 +60,7 @@
 <div id="start">
   <h1>SPIDER<span>-</span>MAN</h1>
   <p>Free swing NYC — swing between the skyscrapers, dodge the streets, and take down villains when they show up. 🕷️</p>
-  <button class="btn" onclick="startGame()">START SWINGING</button>
+  <button class="btn" id="startBtn">START SWINGING</button>
 </div>
 <div id="hud">
   <div class="title">🕷️ SPIDER<span>-</span>MAN · NYC</div>
@@ -140,6 +140,9 @@ function init(){
 
   // hide loading
   setTimeout(()=>{ const l=document.getElementById('loading'); if(l) l.remove(); }, 200);
+
+  const btn = document.getElementById('startBtn');
+  if(btn) btn.addEventListener('click', startGame);
 }
 
 function startGame(){
