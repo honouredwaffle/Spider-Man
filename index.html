@@ -167,15 +167,22 @@ function buildSky(){
 
 function buildGround(){
   const g = new THREE.Mesh(new THREE.PlaneGeometry(1600,1600),
-    new THREE.MeshStandardMaterial({ color: 0x14171f, roughness: 0.95 }));
+    new THREE.MeshStandardMaterial({ color: 0x0e1118, roughness: 0.95 }));
   g.rotation.x = -Math.PI/2; g.receiveShadow = true; scene.add(g);
-  // grid roads
-  const roadMat = new THREE.MeshStandardMaterial({ color: 0x23262f });
-  for(let i=0; i<32; i++){
-    const d = -800 + i*52;
-    const r1 = new THREE.Mesh(new THREE.PlaneGeometry(1600, 6), roadMat); r1.rotation.x=-Math.PI/2; r1.position.set(0,0.1,d); scene.add(r1);
+  // lit road grid (cross streets + avenues)
+  const roadMat = new THREE.MeshStandardMaterial({ color: 0x2c313b, roughness: 0.9 });
+  const laneMat = new THREE.MeshBasicMaterial({ color: 0x8a93a6 });
+  for(let i=0; i<34; i++){
+    const d = -820 + i*50;
+    const r1 = new THREE.Mesh(new THREE.PlaneGeometry(1600, 7), roadMat); r1.rotation.x=-Math.PI/2; r1.position.set(0,0.12,d); scene.add(r1);
+    // center lane dashes
+    const dash = new THREE.Mesh(new THREE.PlaneGeometry(1600, 0.35), laneMat); dash.rotation.x=-Math.PI/2; dash.position.set(0,0.18,d); scene.add(dash);
   }
-  // occasional colored roofs
+  for(let i=0; i<34; i++){
+    const d = -820 + i*50;
+    const r2 = new THREE.Mesh(new THREE.PlaneGeometry(7, 1600), roadMat); r2.rotation.x=-Math.PI/2; r2.position.set(d,0.12,0); scene.add(r2);
+    const dash2 = new THREE.Mesh(new THREE.PlaneGeometry(0.35, 1600), laneMat); dash2.rotation.x=-Math.PI/2; dash2.position.set(d,0.18,0); scene.add(dash2);
+  }
 }
 
 function buildCity(){
@@ -224,9 +231,11 @@ function addTower(grp, x, y, z, w, h, d, colorHex){
   msh.position.set(x, y, z); msh.castShadow=true; msh.receiveShadow=true;
   msh.userData={ isBuilding:true, box:new THREE.Box3().setFromCenterAndSize(new THREE.Vector3(x,y,z), new THREE.Vector3(w,h,d)) };
   grp.add(msh);
-  // windows
-  const winMat = new THREE.MeshBasicMaterial({ color: 0xffe9a0, transparent:true, opacity:.0 });
-  const win = new THREE.Mesh(new THREE.BoxGeometry(w+0.4, h*0.6, d+0.4), winMat);
+  // lit windows (emissive boxes a touch bigger than the tower)
+  const winMat = new THREE.MeshStandardMaterial({
+    color: 0xffdd88, emissive: 0xffc455, emissiveIntensity: 0.9, roughness: 0.5
+  });
+  const win = new THREE.Mesh(new THREE.BoxGeometry(w+0.5, h*0.72, d+0.5), winMat);
   win.position.set(x, y, z); grp.add(win);
 }
 
@@ -391,8 +400,17 @@ function animate(){
   camera.position.lerp(ideal, 0.35);
   camera.lookAt(player.position.clone().add(new THREE.Vector3(0, 1.2, 0)));
 
-  // make Spidey face the camera direction so we always see his back
-  player.rotation.y = Math.atan2(-Math.sin(yaw), -Math.cos(yaw));
+  // make Spidey face where he's actually moving (not the camera),
+  // so pressing W walks FORWARD on screen instead of backward
+  const mv = new THREE.Vector2(velocity.x, velocity.z);
+  if(mv.lengthSq() > 0.5){
+    const targetYaw = Math.atan2(mv.x, mv.y); // model faces +Z, map to XZ
+    // smooth turn toward movement direction
+    let d = targetYaw - player.rotation.y;
+    while(d >  Math.PI) d -= Math.PI*2;
+    while(d < -Math.PI) d += Math.PI*2;
+    player.rotation.y += d * Math.min(1, dt*10);
+  }
 
   // animate limbs
   player.children.forEach((c,i)=>{ if(c.geometry && (c.geometry.type.includes('Box')||c.geometry.type.includes('Sphere'))){
@@ -404,9 +422,12 @@ function animate(){
 
 function updatePlayer(dt){
   const dir = new THREE.Vector3();
-  // build camera-based forward/right from yaw
-  const f = new THREE.Vector3(Math.sin(yaw), 0, Math.cos(yaw));
-  const r = new THREE.Vector3(f.z, 0, -f.x);
+  // camera-based forward/right: camera looks AT player, so screen "into"
+  // = AWAY from camera. Build from the actual camera position so W always
+  // moves you forward on screen (never backward), no matter the orbit.
+  const cv = new THREE.Vector3().subVectors(camera.position, player.position);
+  const f = new THREE.Vector3(cv.x, 0, cv.z); f.normalize();     // into screen
+  const r = new THREE.Vector3(-f.z, 0, f.x);                      // screen right
   let mx=0,mz=0;
   if(keys['KeyW']) mz=1; if(keys['KeyS']) mz=-1;
   if(keys['KeyD']) mx=1; if(keys['KeyA']) mx=-1;
