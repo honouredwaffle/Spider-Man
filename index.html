@@ -379,8 +379,9 @@ function animate(){
   collideWorld();
 
   // third-person follow camera (behind Spidey, orbit with mouse drag)
-  const camDist = 18;
-  const camHeight = 8;
+  const camDist = 34;
+  const camHeight = 12;
+  // camera positioned at yaw (behind Spidey relative to his facing)
   const offset = new THREE.Vector3(
     Math.sin(yaw) * Math.cos(pitch) * camDist,
     Math.sin(pitch) * camDist + camHeight,
